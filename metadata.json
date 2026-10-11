@@ -1,0 +1,6 @@
+{
+  "name": "TOUCH GRASS: Sprout Patrol",
+  "description": "A cozy pocket-companion adventure powered by open-weight AI that gets you off your screen and into the real world.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

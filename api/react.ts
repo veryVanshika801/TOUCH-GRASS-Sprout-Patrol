@@ -1,4 +1,14 @@
-import type { Request, Response } from 'express';
+import type { IncomingMessage, ServerResponse } from 'http';
+
+interface VercelLikeRequest extends IncomingMessage {
+  body?: unknown;
+  method?: string;
+}
+
+interface VercelLikeResponse extends ServerResponse {
+  status?: (code: number) => VercelLikeResponse;
+  json?: (data: unknown) => VercelLikeResponse;
+}
 
 interface ReactRequest {
   mode?: 'checkin' | 'chat';
@@ -13,9 +23,45 @@ interface ReactRequest {
   model?: string;
 }
 
-export default async function handler(req: Request, res: Response) {
+function sendJson(res: VercelLikeResponse, statusCode: number, payload: unknown) {
+  if (typeof res.status === 'function' && typeof res.json === 'function') {
+    const statusRes = res.status(statusCode);
+    if (statusRes && typeof statusRes.json === 'function') {
+      return statusRes.json(payload);
+    }
+    return res.json(payload);
+  }
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(payload));
+}
+
+function parseBody(body: unknown): ReactRequest {
+  if (!body) return {};
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body) as ReactRequest;
+    } catch {
+      return {};
+    }
+  }
+  if (typeof body === 'object') {
+    return body as ReactRequest;
+  }
+  return {};
+}
+
+export default async function handler(req: VercelLikeRequest, res: VercelLikeResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return sendJson(res, 200, { ok: true });
+  }
+
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return sendJson(res, 405, { error: 'Method not allowed' });
   }
 
   try {
@@ -30,7 +76,7 @@ export default async function handler(req: Request, res: Response) {
       moodAfter = 'Refreshed',
       userMessage = '',
       model,
-    } = (req.body || {}) as ReactRequest;
+    } = parseBody(req.body);
 
     const selectedModel =
       model ||
@@ -42,7 +88,7 @@ export default async function handler(req: Request, res: Response) {
       process.env.OPEN_MODEL_BASE_URL || 'https://router.huggingface.co/v1';
 
     if (!apiKey) {
-      return res.status(200).json({
+      return sendJson(res, 200, {
         fallback: true,
         reason: 'No HF_API_KEY or OPEN_MODEL_API_KEY configured on server',
         model: selectedModel,
@@ -60,16 +106,16 @@ export default async function handler(req: Request, res: Response) {
 
     const systemPrompt =
       mode === 'chat'
-        ? `You are ${persona}
-The player sent you a quick message: "${userMessage.slice(0, 200)}".
+        ? `You are ${persona} (${companionName}).
+The player sent you a quick message: "${String(userMessage).slice(0, 200)}".
 Respond in character in 1-2 short, witty sentences that playfully encourage them to step outside and keep screen time tiny.
 Respond ONLY with valid JSON:
 {
   "reaction": "Your 1-2 sentence in-character reply"
 }`
-        : `You are ${persona}
+        : `You are ${persona} (${companionName}).
 The player just returned from the real world after completing "${questTitle}" (${minutesSpent} minutes outside).
-They spotted: ${sightedItems.join(', ') || 'nature vibes'}.
+They spotted: ${Array.isArray(sightedItems) ? sightedItems.join(', ') : 'nature vibes'}.
 Their note: "${reflectionNote || 'Just enjoyed the fresh air!'}"
 Their mood now: ${moodAfter}.
 
@@ -91,7 +137,7 @@ Respond ONLY with valid JSON matching this exact format:
           { role: 'system', content: systemPrompt },
           {
             role: 'user',
-            content: 'Generate the JSON reaction now.',
+            content: 'Generate the JSON response now.',
           },
         ],
         temperature: 0.75,
@@ -100,18 +146,20 @@ Respond ONLY with valid JSON matching this exact format:
     });
 
     if (!response.ok) {
-      return res.status(200).json({
+      return sendJson(res, 200, {
         fallback: true,
         reason: `Status ${response.status}`,
         model: selectedModel,
       });
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
     const rawContent = data?.choices?.[0]?.message?.content || '';
     const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return res.status(200).json({
+      return sendJson(res, 200, {
         fallback: true,
         reason: 'Invalid JSON response',
         model: selectedModel,
@@ -120,21 +168,21 @@ Respond ONLY with valid JSON matching this exact format:
 
     const parsed = JSON.parse(jsonMatch[0]);
     if (!parsed || typeof parsed.reaction !== 'string') {
-      return res.status(200).json({
+      return sendJson(res, 200, {
         fallback: true,
         reason: 'Missing reaction string',
         model: selectedModel,
       });
     }
 
-    return res.status(200).json({
+    return sendJson(res, 200, {
       fallback: false,
       model: selectedModel,
       reaction: parsed.reaction,
       titleAwarded: parsed.titleAwarded || 'Grass Toucher',
     });
   } catch (error) {
-    return res.status(200).json({
+    return sendJson(res, 200, {
       fallback: true,
       reason: error instanceof Error ? error.message : 'Unknown error',
     });

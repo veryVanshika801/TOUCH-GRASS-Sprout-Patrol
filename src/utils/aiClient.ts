@@ -312,7 +312,7 @@ function sanitizeQuests(
 ): Quest[] {
   const fallback = getOfflineQuests(companionId, interests, season);
   const validCategories: OutdoorInterest[] = ['hiking', 'birding', 'gardening', 'running', 'foliage', 'stargazing'];
-  const validFindTypes = ['leaf', 'bird', 'flower', 'stone', 'cloud', 'acorn'] as const;
+  const validFindTypes = ['leaf', 'bird', 'flower', 'stone', 'cloud', 'acorn', 'bug'] as const;
 
   return [0, 1, 2].map((idx) => {
     const rq = rawQuests[idx] || {};

@@ -4,13 +4,26 @@ import { createInitialWeeklyBingo } from '../data/fieldGuideData';
 const ACCOUNTS_KEY = 'touch_grass_accounts_v1';
 const ACTIVE_USER_KEY = 'touch_grass_active_user_v1';
 
-// Hash 4-digit PIN using Web Crypto SHA-256 API
+// Hash 4-digit PIN using Web Crypto SHA-256 API (with deterministic fallback if running on non-HTTPS local IP)
 export async function hashPin(pin: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(`sprout_patrol_salt_${pin}`);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  const input = `sprout_patrol_salt_${pin}`;
+  try {
+    if (typeof crypto !== 'undefined' && crypto.subtle) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(input);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch {
+    // Fallback below
+  }
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 export function migrateAccount(acc: UserAccount): UserAccount {

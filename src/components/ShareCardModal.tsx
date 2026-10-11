@@ -9,6 +9,27 @@ interface ShareCardModalProps {
   onClose: () => void;
 }
 
+function drawRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
 export const ShareCardModal: React.FC<ShareCardModalProps> = ({ account, onClose }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [downloaded, setDownloaded] = useState(false);
@@ -83,8 +104,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({ account, onClose
       const bx = 48 + i * 170;
       const by = 180;
       ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
-      ctx.beginPath();
-      ctx.roundRect(bx, by, 155, 92, 18);
+      drawRoundedRect(ctx, bx, by, 155, 92, 18);
       ctx.fill();
       ctx.strokeStyle = '#B5CEAA';
       ctx.lineWidth = 2;
@@ -114,8 +134,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({ account, onClose
       ctx.fillStyle = '#FDE68A';
       ctx.strokeStyle = '#163020';
       ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.roundRect(cx - 28, cy + 5, 56, 72, 18);
+      drawRoundedRect(ctx, cx - 28, cy + 5, 56, 72, 18);
       ctx.fill();
       ctx.stroke();
 
@@ -148,8 +167,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({ account, onClose
       ctx.fillStyle = '#4ADE80';
       ctx.strokeStyle = '#163020';
       ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.roundRect(cx - 42, cy - 38, 84, 110, 36);
+      drawRoundedRect(ctx, cx - 42, cy - 38, 84, 110, 36);
       ctx.fill();
       ctx.stroke();
     } else {

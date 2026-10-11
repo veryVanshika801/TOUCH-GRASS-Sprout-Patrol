@@ -1,4 +1,14 @@
-import type { Request, Response } from 'express';
+import type { IncomingMessage, ServerResponse } from 'http';
+
+interface VercelLikeRequest extends IncomingMessage {
+  body?: unknown;
+  method?: string;
+}
+
+interface VercelLikeResponse extends ServerResponse {
+  status?: (code: number) => VercelLikeResponse;
+  json?: (data: unknown) => VercelLikeResponse;
+}
 
 interface QuestRequest {
   city?: string;
@@ -11,9 +21,46 @@ interface QuestRequest {
   model?: string;
 }
 
-export default async function handler(req: Request, res: Response) {
+function sendJson(res: VercelLikeResponse, statusCode: number, payload: unknown) {
+  if (typeof res.status === 'function' && typeof res.json === 'function') {
+    const statusRes = res.status(statusCode);
+    if (statusRes && typeof statusRes.json === 'function') {
+      return statusRes.json(payload);
+    }
+    return res.json(payload);
+  }
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(payload));
+}
+
+function parseBody(body: unknown): QuestRequest {
+  if (!body) return {};
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body) as QuestRequest;
+    } catch {
+      return {};
+    }
+  }
+  if (typeof body === 'object') {
+    return body as QuestRequest;
+  }
+  return {};
+}
+
+export default async function handler(req: VercelLikeRequest, res: VercelLikeResponse) {
+  // Handle CORS preflight safely on Vercel
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return sendJson(res, 200, { ok: true });
+  }
+
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return sendJson(res, 405, { error: 'Method not allowed' });
   }
 
   try {
@@ -26,7 +73,7 @@ export default async function handler(req: Request, res: Response) {
       companionId = 'moss',
       companionName = 'Moss',
       model,
-    } = (req.body || {}) as QuestRequest;
+    } = parseBody(req.body);
 
     const selectedModel =
       model ||
@@ -38,7 +85,7 @@ export default async function handler(req: Request, res: Response) {
       process.env.OPEN_MODEL_BASE_URL || 'https://router.huggingface.co/v1';
 
     if (!apiKey) {
-      return res.status(200).json({
+      return sendJson(res, 200, {
         fallback: true,
         reason: 'No HF_API_KEY or OPEN_MODEL_API_KEY configured on server',
         model: selectedModel,
@@ -61,7 +108,7 @@ Generate exactly 3 specific, safe, doable real-world outdoor quests tailored to:
 - Season: ${season}
 - Time of day: ${timeOfDay}
 - Weather: ${weather}
-- Player Interests: ${interests.join(', ')}
+- Player Interests: ${Array.isArray(interests) ? interests.join(', ') : 'hiking, nature'}
 
 Respond ONLY with valid JSON matching this exact structure (no markdown code blocks, no extra text):
 {
@@ -82,7 +129,7 @@ Respond ONLY with valid JSON matching this exact structure (no markdown code blo
 }
 Note:
 - Provide 1 "Easy" (10-15 min, 50 XP), 1 "Medium" (20-30 min, 90 XP), and 1 "Epic" (35-45 min, 150 XP) quest.
-- "findType" must be one of: "leaf", "bird", "flower", "stone", "cloud", "acorn".`;
+- "findType" must be one of: "leaf", "bird", "flower", "stone", "cloud", "acorn", "bug".`;
 
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
@@ -96,7 +143,7 @@ Note:
           { role: 'system', content: systemPrompt },
           {
             role: 'user',
-            content: `Generate 3 outdoor quests for ${city} during ${season} (${timeOfDay}, ${weather}) focusing on ${interests.join(', ')}. Return strict JSON only.`,
+            content: `Generate 3 outdoor quests for ${city} during ${season} (${timeOfDay}, ${weather}). Return strict JSON only.`,
           },
         ],
         temperature: 0.7,
@@ -106,19 +153,21 @@ Note:
 
     if (!response.ok) {
       const errText = await response.text();
-      return res.status(200).json({
+      return sendJson(res, 200, {
         fallback: true,
         reason: `Open model inference returned ${response.status}: ${errText.slice(0, 120)}`,
         model: selectedModel,
       });
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
     const rawContent = data?.choices?.[0]?.message?.content || '';
 
     const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return res.status(200).json({
+      return sendJson(res, 200, {
         fallback: true,
         reason: 'Model output did not contain valid JSON object',
         model: selectedModel,
@@ -127,20 +176,20 @@ Note:
 
     const parsed = JSON.parse(jsonMatch[0]);
     if (!parsed || !Array.isArray(parsed.quests) || parsed.quests.length === 0) {
-      return res.status(200).json({
+      return sendJson(res, 200, {
         fallback: true,
         reason: 'Parsed JSON did not contain quests array',
         model: selectedModel,
       });
     }
 
-    return res.status(200).json({
+    return sendJson(res, 200, {
       fallback: false,
       model: selectedModel,
       quests: parsed.quests,
     });
   } catch (error) {
-    return res.status(200).json({
+    return sendJson(res, 200, {
       fallback: true,
       reason: error instanceof Error ? error.message : 'Unknown error',
     });
